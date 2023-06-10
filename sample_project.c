@@ -14,8 +14,9 @@
 #include "hardware/uart.h"
 #include "pico/binary_info.h"
 #include "pico/multicore.h"
-
-
+#include <stdlib.h>
+#include <string.h>
+#include "MQTTClient.h" //nowe do wgrania
 
 // SPI Defines
 // We are going to use SPI 0, and allocate it to the following GPIO pins
@@ -44,7 +45,7 @@ int64_t alarm_callback(alarm_id_t id, void *user_data) {
 #define ADC_VREF 3.3
 #define ADC_RANGE (1 << 12)
 #define ADC_CONVERT (ADC_VREF / (ADC_RANGE - 1))
-
+#define CYW43_COUNTRY_POLAND   CYW43_COUNTRY('P', 'L', 0)
 
 void core1_main()
 {
@@ -61,6 +62,59 @@ void core1_main()
         /// TODO: SEND THIS DATA TO SERVER 
     }
 }
+// MQTT
+#define ADDRESS     "tcp://mqtt.eclipseprojects.io:1883"
+#define CLIENTID    "PICO_W"
+#define TOPIC       "PROJ2_AMPS"
+#define QOS         1
+#define TIMEOUT     10000L
+
+int mqtt_publish(float PAYLOAD){
+    MQTTClient client;
+    MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
+    MQTTClient_message pubmsg = MQTTClient_message_initializer;
+    MQTTClient_deliveryToken token;
+    int rc;
+
+    if ((rc = MQTTClient_create(&client, ADDRESS, CLIENTID,
+        MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
+    {
+        printf("Failed to create client, return code %d\n", rc);
+        exit(EXIT_FAILURE);
+    }
+
+    conn_opts.keepAliveInterval = 20;
+    conn_opts.cleansession = 1;
+    if ((rc = MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS)
+    {
+        printf("Failed to connect, return code %d\n", rc);
+        exit(EXIT_FAILURE);
+    }
+
+    pubmsg.payload = PAYLOAD;
+    pubmsg.payloadlen = (int)strlen(PAYLOAD);
+    pubmsg.qos = QOS;
+    pubmsg.retained = 0;
+    if ((rc = MQTTClient_publishMessage(client, TOPIC, &pubmsg, &token)) != MQTTCLIENT_SUCCESS)
+    {
+        printf("Failed to publish message, return code %d\n", rc);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Waiting for up to %d seconds for publication of %s\n"
+            "on topic %s for client with ClientID: %s\n",
+            (int)(TIMEOUT/1000), PAYLOAD, TOPIC, CLIENTID);
+    rc = MQTTClient_waitForCompletion(client, token, TIMEOUT);
+    printf("Message with delivery token %d delivered\n", token);
+
+    if ((rc = MQTTClient_disconnect(client, 10000)) != MQTTCLIENT_SUCCESS)
+    printf("Failed to disconnect, return code %d\n", rc);
+    MQTTClient_destroy(&client);
+    return rc;
+}
+
+char[] ssid = "Samsung Adas";
+char[] passwd = "elo320elo";
 
 int main()
 {
@@ -79,7 +133,20 @@ int main()
     printf("hello wow\n");
 
     uint32_t i = 0;
+    
+    if (cyw43_arch_init_with_country(CYW43_COUNTRY_POLAND)) {
+    printf("failed to initialise\n");
+    return 1;
+    }
+    printf("initialised\n");
 
+    cyw43_arch_enable_sta_mode();
+
+    if (cyw43_arch_wifi_connect_timeout_ms(ssid, passwd, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
+    printf("failed to connect\n");
+    return 1;
+    }
+    printf("connected\n");
 
     while (1)
     {
